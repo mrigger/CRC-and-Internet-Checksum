@@ -1,133 +1,184 @@
 #pragma warning(disable: 4996)
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
+#include <time.h>
 
-#define M_SIZE 1024
+#define MAX_LENGTH 1024
 
-typedef struct crcFrame* frameList;
+typedef struct crcframe* frameList;
 typedef struct crcframe {
-
+	uint8_t load[MAX_LENGTH];
+	uint32_t crcValue;
 	frameList next;
 } crcFrame;
 
-typedef enum CRC_MODE { CRC1, CRC5, CRC8, CRC16, CRC32 } MODE;
+typedef enum CRC_MODE { CRC1, CRC5, CRC8, CRC16, CRC32, InternetChecksum} MODE;
 
 // 함수 선언
-unsigned long long calcCRC5(unsigned char M);
-unsigned long long calcCRC8(unsigned char M[]);
+uint8_t calcCRC1(uint8_t M[]);
+uint8_t calcCRC8(uint8_t M[]);
+uint16_t calcCRC16(uint8_t M[]);
+uint32_t calcCRC32(uint8_t M[]);
 
 int main() {
-	unsigned char M[M_SIZE] = { 653 };
-	unsigned long long crcValue = 0;
-	unsigned long long crc[M_SIZE];
+	// 송신부
+	char fileEnd;
+	uint8_t origin[MAX_LENGTH];
+	uint8_t M[MAX_LENGTH];
+	uint32_t crcValue;
 	MODE mode;
-	int stringSize;
-	int i;
+	int lineLength;
+	int crcLength;
+	int i, j;
+	int noiseLevel, prob, line = 0;
+	frameList startframe = NULL, newframe, curr;
+	frameList originframe = NULL, orignew, origcurr;
+
+	// 수신부
+	uint8_t check[MAX_LENGTH];
 
 	FILE *fp = fopen("sample.txt", "rb");
 	
-	mode = CRC5;
+	srand((unsigned int)time(NULL));
 
+	mode = CRC8;
+
+	// 송신부
 	while (1) {
-		if (fp == EOF)
-			break;
+		memset(M, '\0', MAX_LENGTH);
+		fileEnd = fgets(M, MAX_LENGTH, fp);		// 한 라인의 문자열 입력
+		if (!fileEnd) break;
 
-		fgets(M, M_SIZE, fp);		// 한 라인의 문자열 입력
-		M[strlen(M) - 1] = '\0';	// \n 삭제
-		stringSize = strlen(M) - 1;
-		
+		lineLength = strlen(M);
+		M[lineLength - 1] = '\0';	// \n 삭제
+		M[lineLength - 2] = '\0';	// \r 삭제
+		strcpy(origin, M);
 
-		if (mode == CRC1) {
+		if (mode == CRC1) {}
+		else if (mode == CRC8) { crcValue = calcCRC8(M); crcLength = 8; }
+		else if (mode == CRC16) {}
+		else {}
 
-		}
-		else if (mode == CRC5) {
-			// (8 + 5) bit = 13
-			for (i = 0; i < stringSize; i++) {
-				crc[i] = calcCRC5(M[i]);
+		noiseLevel = 10;	// 0.001
+
+		// 입력 비트스트림 에러 생성
+		for (i = 0; i < lineLength; i++) {
+			for (j = 7; j >= 0; j--) {
+				prob = (int)(rand() % noiseLevel);
+				if (prob == 1) {
+					printf("Line bit Error. [%d] \n", line);
+					M[i] ^= (1 << j);
+				}
 			}
 		}
-		else if (mode == CRC8) {
-			for (i = 0; i < stringSize; i++) {
-				crc[i] = calcCRC8(M[i]);
+
+		// CRC 값 에러생성
+		for (i = 0; i < crcLength; i++) {
+			prob = (int)(rand() % noiseLevel);
+			if (prob == 1) {
+				printf("CRC bit Error. [%d] \n", line);
+				crcValue ^= (1 << i);
 			}
 		}
-		else if (mode == CRC16) {
 
+		// 리스트에 연결
+		if (!startframe) {
+			startframe = (frameList)malloc(sizeof(crcFrame));
+			strcpy(startframe->load, M);
+			startframe->crcValue = crcValue;
+			startframe->next = NULL;
+			curr = startframe;
+
+			originframe = (frameList)malloc(sizeof(crcFrame));
+			strcpy(originframe->load, origin);
+			originframe->crcValue = 0;
+			originframe->next = NULL;
+			origcurr = originframe;
 		}
 		else {
+			newframe = (frameList)malloc(sizeof(crcFrame));
+			strcpy(newframe->load, M);
+			newframe->crcValue = crcValue;
+			newframe->next = NULL;
+			curr->next = newframe;
+			curr = curr->next;
 
+			orignew = (frameList)malloc(sizeof(crcFrame));
+			strcpy(orignew->load, origin);
+			orignew->crcValue = 0;
+			orignew->next = NULL;
+			origcurr->next = orignew;
+			origcurr = origcurr->next;
 		}
-
-		/*
-			지금 현재 한 frame의 crcValue값을 계산하였음
-			그러면 이제 이 한 프레임의 비트 값에서 에러를 주고
-			저장을 하면 되나?
-			그리고 비교?
-		*/
-		
+		line++;
 	}
 
+	printf("\n");
 
-	// 디버그용 코드
-	// result = calcCRC5(653);
-	// printf("%lld %lld\n", result);
+	// 수신부
+	curr = startframe;
+	origcurr = originframe;
+	line = 0;
+	int totalErr = 0;
+	int realErr;
+	int foundErr;
+	int incorrect = 0;
+	int notFound = 0;
+
+	while(curr->next) {
+		realErr = 0;
+		foundErr = 0;
+		memset(check, '\0', MAX_LENGTH);
+		if (mode == CRC1) {}
+		else if (mode == CRC8) {
+			strcpy(check, curr->load);
+			check[strlen(check)] = (uint8_t)curr->crcValue;
+		}
+		else if (mode == CRC16) {}
+		else {}
+
+		if (mode == CRC8) {
+			crcValue = calcCRC8(check);
+			if (strcmp(origcurr->load, curr->load)) {
+				realErr = 1;
+				printf("R: Miss correct. [%d] --- ", line);
+				totalErr++;
+			}
+		}
+
+		if (crcValue != 0) {
+			foundErr = 1;
+			printf("F: Miss correct. [%d]", line);
+		}
+
+		if (realErr || foundErr) printf("\n");
+		if (!realErr && foundErr) incorrect++;
+		if (realErr && !foundErr) notFound++;
+
+		line++;
+		curr = curr->next;
+		origcurr = origcurr->next;
+	}
+
+	printf("Check error line : %d\n", totalErr - incorrect - notFound);
+	printf("Total error line : %d\n", totalErr);
+	printf("잘못 찾은 갯수 : %d\n", incorrect);
+	printf("못 찾은 갯수 : %d\n", notFound);
 
 	fclose(fp);
 	return 0;
 }
 
-unsigned long long calcCRC5(unsigned char M) {
-	int i, j;
-	
-	unsigned long long crcValue = 0;
-	unsigned long long crcCalc = 0;
-	unsigned long long output = 0;
-	int input;
-	int c0, c2, c4;
-
-	
-	// 8비트입력
-	for (j = 7; j >= 0; j--) {
-		// 각 위치의 비트를 input으로 받음
-		if ((M & (1 << j)))
-			input = 1;
-		else
-			input = 0;
-		
-		output = output << 1;
-		output += input;
-
-		c0 = (((crcValue & 0x10) >> 4) ^ input);	// c0 = c4 xor input
-		c2 = c0 ^ ((crcValue & 0x02) >> 1);			// c2 = c4 xor input xor c1
-		c4 = c0 ^ ((crcValue & 0x08) >> 3);			// c4 = c4 xor input xor c3
-
-		crcCalc = c0 + (c2 << 2) + (c4 << 4);
-
-		// 먼저 한 자리 씩 shift
-		crcValue = crcValue << 1;
-		crcValue = crcValue % 32;
-
-		// 값을 넣어주기 위해 0, 2, 4번째 reset (0_1010)
-		// 계산된 값 넣음
-		crcValue &= 0x0A;
-		crcValue ^= crcCalc;
-	}
-
-	// 남은 5비트 입력
-	output = output << 5;
-	output += crcValue;
-
-	return output;
-}
-
-unsigned long long calcCRC8(unsigned char M[])
+uint8_t calcCRC8(uint8_t M[])
 {
-	unsigned long long crcValue = 0;
-	unsigned long long crcCalc = 0;
+	uint8_t crcValue = 0;
+	uint8_t crcCalc = 0;
 	int input;
 	int c0, c2, c1;
-	int stringSize = strlen(M) - 1;
+	int stringSize = strlen(M);
 
 	for (int i = 0; i < stringSize; i++)
 	{

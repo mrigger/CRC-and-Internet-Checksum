@@ -277,11 +277,11 @@ void Rx(MODE mode) {
 	}
 
 	printf("\n");
-	printf("[총 라인 수]\n");
-	printf("Total line : %d\n\n", line);
+	printf("[총 라인]\n");
+	printf("Total lines : %d\n\n", line);
 	printf("[실제 에러]\n");
 	printf("Total error : %d\n\n", totalErr);
-	printf("[측정한 에러]\n");
+	printf("[측정된 에러]\n");
 	printf("Line error: %d\n", result);
 	printf("Additional bit error: %d\n", incorrect);
 	printf("Total found error: %d\n\n", result + incorrect);

@@ -12,41 +12,93 @@ typedef struct crcframe* frameList;
 typedef struct crcframe {
 	uint8_t load[MAX_LENGTH];
 	uint32_t crcValue;
+	int error;
 	frameList next;
 } crcFrame;
 
-typedef enum CRC_MODE { CRC1, CRC5, CRC8, CRC16, CRC32, InternetChecksum} MODE;
+typedef enum CRC_MODE { CRC1, CRC8, CRC16, CRC32, InternetChecksum, Error} MODE;
+
+frameList startframe = NULL;
 
 // 함수 선언
+MODE selectMode();
+int selectProb();
+void Tx(MODE mode);
+void Rx(MODE mode);
 uint8_t calcCRC1(uint8_t M[]);
 uint8_t calcCRC8(uint8_t M[]);
 uint16_t calcCRC16(uint8_t M[]);
 uint32_t calcCRC32(uint8_t M[]);
+uint16_t calcInternetChecksum(uint8_t M[]);
 
 int main() {
-	// 송신부
-	char fileEnd;
-	uint8_t origin[MAX_LENGTH];
+	MODE mode;
+	srand((unsigned int)time(NULL));
+	
+	mode = selectMode();	// 실행 모드 입력
+	if (mode == Error) return -1;
+	Tx(mode);				// 전송
+	Rx(mode);				// 수신
+
+	return 0;
+}
+
+MODE selectMode() {
+	MODE mode;
+	int input;
+
+	printf("<<< CRC and Internet Checksum >>>\n\n");
+	printf("[ Select mode ]\n");
+	printf("[1] CRC1  [2] CRC8  [3] CRC16  [4] CRC32 [5] InternetChecksum\n\n");
+	printf("Mode: ");
+	scanf("%d", &input);
+
+	switch (input) {
+	case 1: mode = CRC1; break;
+	case 2: mode = CRC8; break;
+	case 3: mode = CRC16; break;
+	case 4: mode = CRC32; break;
+	case 5: mode = InternetChecksum; break;
+	default: printf("Incorrect input value\n"); return Error;
+	}
+
+	return mode;
+}
+
+int selectProb() {
+	int input, prob;
+
+	printf("\n[ Select probability ]\n");
+	printf("[1] 0.1  [2] 0.001  [3] 0.00001  [4] 0.000000001\n\n");\
+	printf("Mode: ");
+	scanf("%d", &input);
+
+	switch (input) {
+	case 1: prob = 10; break;
+	case 2: prob = 1000; break;
+	case 3: prob = 100000; break;
+	case 4: prob = 1000000000; break;
+	default: printf("Incorrect input value [default: 0.1]\n"); prob = 10; break;
+	}
+
+	return prob;
+}
+
+void Tx(MODE mode) {
 	uint8_t M[MAX_LENGTH];
 	uint32_t crcValue;
-	MODE mode;
+	char* fileEnd;
 	int lineLength;
+	int line = 0;
 	int crcLength;
-	int i, j;
-	int noiseLevel, prob, line = 0;
-	frameList startframe = NULL, newframe, curr;
-	frameList originframe = NULL, orignew, origcurr;
-
-	// 수신부
-	uint8_t check[MAX_LENGTH];
-
+	int noiseLevel;
+	int error = 0;
+	frameList newframe, curr;
 	FILE *fp = fopen("sample.txt", "rb");
 	
-	srand((unsigned int)time(NULL));
-	mode = CRC32;
-
-	// 송신부
+	noiseLevel = selectProb();
 	while (1) {
+		error = 0;
 		memset(M, '\0', MAX_LENGTH);
 		fileEnd = fgets(M, MAX_LENGTH, fp);		// 한 라인의 문자열 입력
 		if (!fileEnd) break;
@@ -56,26 +108,26 @@ int main() {
 		M[lineLength - 2] = '\0';	// \r 삭제
 		lineLength -= 2;
 
-		strcpy(origin, M);
-
 		if (mode == CRC1) { crcValue = calcCRC1(M); crcLength = 1; }
 		else if (mode == CRC8) { crcValue = calcCRC8(M); crcLength = 8; }
 		else if (mode == CRC16) { crcValue = calcCRC16(M); crcLength = 16; }
 		else if (mode == CRC32) { crcValue = calcCRC32(M); crcLength = 32; }
-
-		noiseLevel = 1000;	// 0.001
+		else { crcValue = calcInternetChecksum(M); crcLength = 16; }
 
 		// 입력 비트스트림 에러 생성
+		/*
 		for (i = 0; i < lineLength; i++) {
 			for (j = 7; j >= 0; j--) {
 				prob = (int)(rand() % noiseLevel);
 				if (prob == 1) {
-					//printf("Line bit Error. [%d] \n", line);
+					// printf("Line bit Error. [%d] \n", line);
 					M[i] ^= (1 << j);
+					error = 1;
 				}
 			}
 		}
-
+		*/
+		/*
 		// CRC 값 에러생성
 		for (i = 0; i < crcLength; i++) {
 			prob = (int)(rand() % noiseLevel);
@@ -84,44 +136,40 @@ int main() {
 				crcValue ^= (1 << i);
 			}
 		}
+		*/
 
 		// 리스트에 연결
 		if (!startframe) {
 			startframe = (frameList)malloc(sizeof(crcFrame));
 			strcpy(startframe->load, M);
 			startframe->crcValue = crcValue;
+			startframe->error = error;
 			startframe->next = NULL;
 			curr = startframe;
-
-			originframe = (frameList)malloc(sizeof(crcFrame));
-			strcpy(originframe->load, origin);
-			originframe->crcValue = 0;
-			originframe->next = NULL;
-			origcurr = originframe;
 		}
 		else {
 			newframe = (frameList)malloc(sizeof(crcFrame));
 			strcpy(newframe->load, M);
 			newframe->crcValue = crcValue;
+			newframe->error = error;
 			newframe->next = NULL;
 			curr->next = newframe;
 			curr = curr->next;
-
-			orignew = (frameList)malloc(sizeof(crcFrame));
-			strcpy(orignew->load, origin);
-			orignew->crcValue = 0;
-			orignew->next = NULL;
-			origcurr->next = orignew;
-			origcurr = origcurr->next;
 		}
 		line++;
 	}
 
 	printf("\n");
+	fclose(fp);
+}
 
-	// 수신부
+void Rx(MODE mode) {
+	uint32_t crcValue;
+	uint8_t check[MAX_LENGTH];
+	frameList curr;
+	int line;
+
 	curr = startframe;
-	origcurr = originframe;
 	line = 0;
 	int totalErr = 0;
 	int realErr;
@@ -129,8 +177,9 @@ int main() {
 	int incorrect = 0;
 	int notFound = 0;
 	int result = 0;
+	int errorline = 0;
 
-	while(curr->next) {
+	while (curr->next) {
 		realErr = 0;
 		foundErr = 0;
 		memset(check, '\0', MAX_LENGTH);
@@ -147,51 +196,65 @@ int main() {
 			check[strlen(check)] = (uint8_t)(curr->crcValue >> 8);
 			check[strlen(check)] = (uint8_t)(curr->crcValue);
 		}
-		else if(mode == CRC32) {
+		else if (mode == CRC32) {
 			strcpy(check, curr->load);
 			check[strlen(check)] = (uint8_t)(curr->crcValue >> 24);
 			check[strlen(check)] = (uint8_t)(curr->crcValue >> 16);
 			check[strlen(check)] = (uint8_t)(curr->crcValue >> 8);
 			check[strlen(check)] = (uint8_t)(curr->crcValue);
 		}
-		else {}
+		else {
+			strcpy(check, curr->load);
+			check[strlen(check)] = (uint8_t)(curr->crcValue >> 8);
+			check[strlen(check)] = (uint8_t)(curr->crcValue);
+		}
 
 		if (mode == CRC1) {
 			crcValue = calcCRC1(check);
-			if (strcmp(origcurr->load, curr->load)) {
+			if (curr->error == 1) {
 				realErr = 1;
-				printf("R: Miss correct. [%d] --- ", line);
+				printf("R: ERROR [%d] ", line);
 				totalErr++;
 			}
 		}
 		else if (mode == CRC8) {
 			crcValue = calcCRC8(check);
-			if (strcmp(origcurr->load, curr->load)) {
+			if (curr->error == 1) {
 				realErr = 1;
-				printf("R: Miss correct. [%d] --- ", line);
+				printf("R: ERROR [%d] ", line);
 				totalErr++;
 			}
 		}
 		else if (mode == CRC16) {
 			crcValue = calcCRC16(check);
-			if (strcmp(origcurr->load, curr->load)) {
+			if (curr->error == 1) {
 				realErr = 1;
-				printf("R: Miss correct. [%d] --- ", line);
+				printf("R: ERROR [%d] ", line);
 				totalErr++;
 			}
 		}
 		else if (mode == CRC32) {
 			crcValue = calcCRC32(check);
-			if (strcmp(origcurr->load, curr->load)) {
+			if (curr->error == 1) {
 				realErr = 1;
-				printf("R: Miss correct. [%d] --- ", line);
+				printf("R: ERROR [%d] ", line);
+				totalErr++;
+			}
+		}
+		else {
+			crcValue = calcInternetChecksum(check);
+			if (curr->error == 1) {
+				realErr = 1;
+				printf("R: ERROR [%d] ", line);
 				totalErr++;
 			}
 		}
 
 		if (crcValue != 0) {
 			foundErr = 1;
-			printf("F: Miss correct. [%d]", line);
+			if(realErr == 0) printf("R: GOOD  [%d] [%s] ", line, curr->load);
+			printf("F: ERROR [%d] ", line);
+			errorline++;
 		}
 
 		if (realErr || foundErr) printf("\n");
@@ -201,17 +264,14 @@ int main() {
 
 		line++;
 		curr = curr->next;
-		origcurr = origcurr->next;
 	}
 
-	printf("Check error line : %d\n", totalErr - result);
+	printf("\n");
 	printf("Total error line : %d\n", totalErr);
-	printf("잘못 찾은 갯수 : %d\n", incorrect);
-	printf("못 찾은 갯수 : %d\n", notFound);
-	printf("일치하는 갯수 : %d\n", result);
-
-	fclose(fp);
-	return 0;
+	printf("정확하게 찾은 에러 : %d\n", result);
+	printf("에러가 아닌데 에러로 찾은 갯수 (CRC value error): %d\n", incorrect);
+	printf("에러인데 못 찾은 갯수 : %d\n", notFound);
+	printf("Check error line : %d\n", errorline);
 }
 
 uint8_t calcCRC1(uint8_t M[]) {
@@ -305,19 +365,16 @@ uint16_t calcCRC16(uint8_t M[]) {
 			else
 				input = 0;
 
-			// C값 계산.
-			c0 = (((crcValue & 0x8000) >> 15) ^ input);				// c0 = c15 xor input
-			c15 = c0 ^ ((crcValue & 0x4000) >> 14);					// c15 = c15 xor input xor C14
-			c8 = c0 ^ ((crcValue & 0x0080) >> 7);					// c8 = c15 xor input xor c7
+			c0 = (((crcValue >> 15) & 1) ^ input);				// c0 = c15 xor input
+			c15 = c0 ^ ((crcValue >> 14) & 1);					// c15 = c15 xor input xor C14
+			c8 = c0 ^ ((crcValue >> 7) & 1);;					// c8 = c15 xor input xor c7
 
 			crcCalc = c0 + (c8 << 8) + (c15 << 15);
 
 			crcValue = crcValue << 1;
-			// crcValue %= 65536;
-			// 1 0000 0000 0000 0000
 			crcValue %= 0x10000;
 
-			// 0,8,15 째 bit를 저장해야함 ==> 0111_1110_1111_1110
+			// 값을 넣어주기 위해 0, 8, 15번째 reset (0111_1110_1111_1110)
 			crcValue &= 0x7EFE;
 			crcValue ^= crcCalc;
 		}
@@ -343,30 +400,27 @@ uint32_t calcCRC32(uint8_t M[]) {
 			else
 				input = 0;
 
-			// C값 계산.
-			c0 = (((crcValue & 0x80000000) >> 31) ^ input);	// C31 xor input ==> C0
-			c26 = c0 ^ ((crcValue & 0x02000000) >> 25);			// C31 xor input xor C25 = C26
-			c23 = c0 ^ ((crcValue & 0x00400000) >> 22);			// C31 xor input xor C22 = C23
-			c22 = c0 ^ ((crcValue & 0x00200000) >> 21);			// C31 xor input xor C21 = C22
-			c16 = c0 ^ ((crcValue & 0x00008000) >> 15);			// C31 xor input xor C15 = C16
-			c12 = c0 ^ ((crcValue & 0x00000800) >> 11);			// C31 xor input xor C11 = C12
-			c11 = c0 ^ ((crcValue & 0x00000400) >> 10);			// C31 xor input xor C10 = C11
-			c10 = c0 ^ ((crcValue & 0x00000200) >> 9);			// C31 xor input xor C9  = C10
-			c8 = c0 ^ ((crcValue & 0x00000080) >> 7);			// C31 xor input xor C7  = C8
-			c7 = c0 ^ ((crcValue & 0x00000040) >> 6);			// C31 xor input xor C6  = C7
-			c5 = c0 ^ ((crcValue & 0x00000010) >> 4);			// C31 xor input xor C4  = C5
-			c4 = c0 ^ ((crcValue & 0x00000008) >> 3);			// C31 xor input xor C3  = C4
-			c2 = c0 ^ ((crcValue & 0x00000002) >> 1);			// C31 xor input xor C1  = C2
-			c1 = c0 ^ (crcValue & 0x00000001);					// C31 xor input xor C0  = C1
+			c0 = (((crcValue & 0x80000000) >> 31) ^ input);		// c0 = c31 xor input
+			c26 = c0 ^ ((crcValue & 0x02000000) >> 25);			// c26 = c31 xor input xor c25
+			c23 = c0 ^ ((crcValue & 0x00400000) >> 22);			// c23 = c31 xor input xor c22
+			c22 = c0 ^ ((crcValue & 0x00200000) >> 21);			// c22 = c31 xor input xor c21
+			c16 = c0 ^ ((crcValue & 0x00008000) >> 15);			// c16 = c31 xor input xor c15
+			c12 = c0 ^ ((crcValue & 0x00000800) >> 11);			// c12 = c31 xor input xor c11
+			c11 = c0 ^ ((crcValue & 0x00000400) >> 10);			// c11 = c31 xor input xor c10
+			c10 = c0 ^ ((crcValue & 0x00000200) >> 9);			// c10 = C31 xor input xor c9
+			c8 = c0 ^ ((crcValue & 0x00000080) >> 7);			// c8 = c31 xor input xor c7
+			c7 = c0 ^ ((crcValue & 0x00000040) >> 6);			// c7 = c31 xor input xor c6
+			c5 = c0 ^ ((crcValue & 0x00000010) >> 4);			// c5 = c31 xor input xor c4
+			c4 = c0 ^ ((crcValue & 0x00000008) >> 3);			// c4 = c31 xor input xor c3
+			c2 = c0 ^ ((crcValue & 0x00000002) >> 1);			// c2 = c31 xor input xor c1
+			c1 = c0 ^ (crcValue & 0x00000001);					// c1 = c31 xor input xor c0
 
-			crcCalc = c0 + c26 * 0x2000000 + c23 * 0x400000 + c22 * 0x200000 + c16 * 0x8000
-				+ c12 * 0x800 + c11 * 0x400 + c10 * 0x200 + c8 * 0x80 + c7 * 0x40 
-				+ c5 * 0x10 + c4 * 0x08 + c2 * 0x02 + c1 * 0x01;
-
+			crcCalc = c0 + c26 * 0x4000000 + c23 * 0x800000 + c22 * 0x400000 + c16 * 0x10000 + c12 * 0x1000 + c11 * 0x800
+				+ c10 * 0x400 + c8 * 0x100 + c7 * 0x80 + c5 * 0x20 + c4 * 0x10 + c2 * 0x04 + c1 * 0x02;
 			crcValue <<= 1;
 			crcValue %= 0x100000000;
 
-			// 0,1,2,4,5,7,8,10,11,12,16,22,23,26 저장해야함. ==>  1111_1011_0011_1110_1110_0010_0100_1000 / FB3EE248
+			// 값을 넣어주기 위해 0, 1, 2, 4, 5, 7, 8, 10, 11, 12, 16, 22, 23, 26번째 reset (1111_1011_0011_1110_1110_0010_0100_1000)
 			crcValue &= 0xFB3EE248;
 			crcValue ^= crcCalc;
 		}
@@ -375,6 +429,29 @@ uint32_t calcCRC32(uint8_t M[]) {
 	return crcValue;
 }
 
+uint16_t calcInternetChecksum(uint8_t M[]) {
+	uint32_t checksum = 0;
+	uint16_t word1 = 0;
+	uint16_t word2 = 0;
+	int i;
+	int stringSize = strlen(M);
+
+	for (i = 0; i < stringSize; i = i + 2) {
+		word1 = (uint16_t)checksum;
+		word2 = M[i];
+		word2 <<= 8;
+		word2 += M[i + 1];
+
+		checksum = word1 + word2;
+
+		if (checksum / 0x10000) {
+			checksum %= 0x10000;
+			checksum += 1;
+		}
+	}
+	
+	return (uint16_t)(0xFFFF ^ checksum);
+}
 /*
 	[과제]
 

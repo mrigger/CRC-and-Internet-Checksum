@@ -106,9 +106,11 @@ void Tx(MODE mode) {
 		if (!fileEnd) break;
 
 		lineLength = strlen(M);
+#ifdef _WIN32
 		M[lineLength - 1] = '\0';	// remove \n
 		M[lineLength - 2] = '\0';	// remove \r
 		lineLength -= 2;
+#endif
 
 		// calculate CRC value
 		if (mode == CRC1) { crcValue = calcCRC1(M, lineLength); crcLength = 1; }
